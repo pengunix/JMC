@@ -1,0 +1,16 @@
+[package]
+name = "JMC"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+console-subscriber = "0.5.0"
+embedded-can = "0.4.1"
+futures-timer = "3.0.4"
+futures-util = "0.3.32"
+tokio = { version = "1.52.3", features = ["full", "tracing"] }
+
+[dependencies.socketcan]
+version = "3.5.0"
+features = ["tokio"]
