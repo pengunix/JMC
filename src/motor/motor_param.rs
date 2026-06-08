@@ -20,7 +20,7 @@ pub enum MotorModel {
     RS06,
 }
 
-pub(super) struct Limits {
+pub struct Limits {
     pub q_max: f32,
     pub dq_max: f32,
     pub kp_max: f32,

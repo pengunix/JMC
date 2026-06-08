@@ -1,7 +1,11 @@
+use async_trait::async_trait;
 use super::motor::Motor;
 use super::motor::MotorControl;
+use super::motor::MotorState;
+use super::motor_param::{Limits, MotorModel};
 use embedded_can::Frame;
 use socketcan::{CanFrame, ExtendedId, Id, StandardId};
+use tokio::sync::watch;
 
 /// 29位ID段： bit 21~16
 #[repr(u32)]
@@ -33,8 +37,37 @@ pub struct MotorRS {
     pub motor: Motor,
 }
 
+#[async_trait]
 impl MotorControl for MotorRS {
-    fn parse_frame(&self, frame: &CanFrame) -> Option<super::motor::MotorState> {
+    fn slave_id(&self) -> u32 {
+        self.motor.slave_id
+    }
+
+    fn master_id(&self) -> u32 {
+        self.motor.master_id
+    }
+
+    fn use_extended_id(&self) -> bool {
+        self.motor.use_extended_id
+    }
+
+    fn model(&self) -> &MotorModel {
+        &self.motor.model
+    }
+
+    fn limits(&self) -> &Limits {
+        &self.motor.limits
+    }
+
+    fn subscribe_state(&self) -> watch::Receiver<MotorState> {
+        self.motor.subscribe_state()
+    }
+
+    fn state_tx(&self) -> &watch::Sender<MotorState> {
+        &self.motor.state_tx
+    }
+
+    fn parse_frame(&self, frame: &CanFrame) -> Option<MotorState> {
         let data = frame.data();
         let extend_id = match frame.id() {
             Id::Standard(id) => ExtendedId::new(id.as_raw() as u32).unwrap(),
@@ -48,22 +81,13 @@ impl MotorControl for MotorRS {
         let tau_int = ((data[4] as u16) << 8) | (data[5] as u16);
         let temp_int = ((data[6] as u16) << 8) | (data[7] as u16);
 
-        Some(super::motor::MotorState {
-            q: self.int_to_float(q_int, -self.motor.limits.q_max, self.motor.limits.q_max, 16),
-            dq: self.int_to_float(
-                dq_int,
-                -self.motor.limits.dq_max,
-                self.motor.limits.dq_max,
-                16,
-            ),
-            tau: self.int_to_float(
-                tau_int,
-                -self.motor.limits.tau_max,
-                self.motor.limits.tau_max,
-                16,
-            ),
+        let limits = self.limits();
+        Some(MotorState {
+            q: self.int_to_float(q_int, -limits.q_max, limits.q_max, 16),
+            dq: self.int_to_float(dq_int, -limits.dq_max, limits.dq_max, 16),
+            tau: self.int_to_float(tau_int, -limits.tau_max, limits.tau_max, 16),
             temp: temp_int as f32 / 10.0,
-            error: extend_id.as_raw() & 0x3FFFFF, // 错误信息在ID的低22位
+            error: extend_id.as_raw() & 0x3FFFFF,
         })
     }
 
@@ -103,7 +127,7 @@ impl MotorControl for MotorRS {
             .map_err(|e| e.to_string())
     }
 
-    async fn set_param(&mut self, reg: u16, value: u32) -> Result<(), String>{
+    async fn set_param(&mut self, reg: u16, value: u32) -> Result<(), String> {
         let id = if self.motor.use_extended_id {
             Id::Extended(
                 ExtendedId::new(self.motor.slave_id | (self.motor.master_id << 8) | (0x12 << 24))
@@ -125,7 +149,8 @@ impl MotorControl for MotorRS {
                 ((value >> 16) & 0xFF) as u8,
                 ((value >> 24) & 0xFF) as u8,
             ],
-        ).unwrap();
+        )
+        .unwrap();
         self.motor
             .can_tx
             .send(frame)
@@ -145,16 +170,12 @@ impl MotorControl for MotorRS {
         qd: f32,
         tau: f32,
     ) -> Result<(), String> {
-        let kp_int = self.float_to_int(kp, 0.0, self.motor.limits.kp_max, 16);
-        let kd_int = self.float_to_int(kd, 0.0, self.motor.limits.kd_max, 16);
-        let q_int = self.float_to_int(q, -self.motor.limits.q_max, self.motor.limits.q_max, 16);
-        let dq_int = self.float_to_int(qd, -self.motor.limits.dq_max, self.motor.limits.dq_max, 16);
-        let tau_int = self.float_to_int(
-            tau,
-            -self.motor.limits.tau_max,
-            self.motor.limits.tau_max,
-            16,
-        );
+        let limits = self.limits();
+        let kp_int = self.float_to_int(kp, 0.0, limits.kp_max, 16);
+        let kd_int = self.float_to_int(kd, 0.0, limits.kd_max, 16);
+        let q_int = self.float_to_int(q, -limits.q_max, limits.q_max, 16);
+        let dq_int = self.float_to_int(qd, -limits.dq_max, limits.dq_max, 16);
+        let tau_int = self.float_to_int(tau, -limits.tau_max, limits.tau_max, 16);
 
         let id = if self.motor.use_extended_id {
             Id::Extended(
