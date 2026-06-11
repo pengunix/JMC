@@ -5,10 +5,13 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
-console-subscriber = "0.5.0"
+async-trait = "0.1.89"
 embedded-can = "0.4.1"
 futures-timer = "3.0.4"
 futures-util = "0.3.32"
+ros2-client = "0.8.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9"
 tokio = { version = "1.52.3", features = ["full", "tracing"] }
 
 [dependencies.socketcan]
